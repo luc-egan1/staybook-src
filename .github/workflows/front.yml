@@ -1,0 +1,79 @@
+# CI du front StayBook : à chaque push sur main qui touche front/,
+#   1. construire l'image (amd64 + arm64) et la pousser sur GitHub Container Registry (ghcr.io) ;
+#   2. écrire le nouveau tag dans overlays/dev/kustomization.yaml du dépôt GitOps (commit + push).
+# Argo CD fait le reste : c'est lui, et lui seul, qui déploie (modèle pull).
+name: front
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "front/**"
+      - ".github/workflows/front.yml"
+  workflow_dispatch:
+
+env:
+  GITOPS_REPO: luc-egan1/tp_argocd_kube
+
+jobs:
+  build-push:
+    name: CI — construire et publier l'image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Nom de l'image et tag (= commit)
+        id: meta
+        run: |
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "image=ghcr.io/${owner}/staybook-front" >> "$GITHUB_OUTPUT"
+          echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3        # pour construire l'image arm64 sur un runner amd64
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Connexion à ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build et push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./front
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+
+  update-gitops:
+    name: CD — déclarer la nouvelle image en dev (dépôt GitOps)
+    needs: build-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cloner le dépôt GitOps
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.GITOPS_REPO }}
+          token: ${{ secrets.GITOPS_TOKEN }}   # PAT fine-grained, Contents: Read and write sur tp_argocd_kube
+
+      - name: Changer le tag du front dans overlays/dev
+        run: |
+          cd overlays/dev
+          kustomize edit set image staybook-front=${{ needs.build-push.outputs.image }}:${{ needs.build-push.outputs.tag }}
+          git diff
+
+      - name: Commit et push
+        run: |
+          git config user.name  "staybook-ci"
+          git config user.email "ci@staybook.local"
+          if git diff --quiet; then echo "overlays/dev déjà à jour, rien à commiter"; exit 0; fi
+          git commit -am "ci(dev): front ${{ needs.build-push.outputs.tag }} (${{ github.repository }}@${GITHUB_SHA::7})"
+          git push

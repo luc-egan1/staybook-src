@@ -1,0 +1,157 @@
+# =====================================================================
+#  StayBook — docker-compose.yml À COMPLÉTER
+#  ---------------------------------------------------------------
+#  Le code de l'application est fourni et fonctionne.
+#  Vous ne touchez ni au JavaScript, ni au SQL, ni aux Dockerfiles.
+#
+#  Votre travail : décrire ici les 9 conteneurs de l'application.
+#  5 sont déjà écrits et commentés, ils servent de MODÈLE.
+#  4 sont à écrire (cherchez les « TODO »), en recopiant un modèle.
+#  Le fichier reste valide à chaque étape : testez après chaque TODO.
+# =====================================================================
+
+services:
+
+  # -------------------------------------------------------------
+  #  MODÈLE A : un service qui utilise une IMAGE toute faite
+  # -------------------------------------------------------------
+  postgres-hotels:
+    image: postgres:16-alpine              # image publique téléchargée depuis Docker Hub
+    environment:                           # variables lues par le programme au démarrage
+      POSTGRES_DB: hotels
+      POSTGRES_USER: hotels
+      POSTGRES_PASSWORD: hotels
+    volumes:
+      - hotels-data:/var/lib/postgresql/data              # les données survivent au conteneur
+      - ./db/hotels-init.sql:/docker-entrypoint-initdb.d/init.sql:ro   # script SQL joué au 1er démarrage
+    healthcheck:                           # comment Docker sait que la base est PRÊTE
+      test: ["CMD-SHELL", "pg_isready -U hotels -d hotels"]
+      interval: 5s
+      retries: 10
+    networks: [tp]
+
+  postgres-reservations:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: reservations
+      POSTGRES_USER: reservations
+      POSTGRES_PASSWORD: reservations
+    volumes:
+      - reservations-data:/var/lib/postgresql/data
+      - ./db/reservations-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reservations -d reservations"]
+      interval: 5s
+      retries: 10
+    networks: [tp]
+
+  qdrant:                                  # base de données vectorielle du concierge
+    image: qdrant/qdrant:v1.10.1
+    volumes:
+      - qdrant-data:/qdrant/storage
+    networks: [tp]
+
+  ollama:                                  # serveur qui fait tourner les modèles d'IA (Llama)
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-data:/root/.ollama          # sans volume : 1,5 Go de modèles à retélécharger à chaque fois
+    networks: [tp]
+
+  # -------------------------------------------------------------
+  #  MODÈLE B : un service CONSTRUIT depuis notre code (build)
+  # -------------------------------------------------------------
+  hotels-service:
+    build: ./hotels-service                # Docker construit l'image avec le Dockerfile de ce dossier
+    environment:
+      DB_HOST: postgres-hotels             # on parle aux autres conteneurs PAR LEUR NOM
+      DB_USER: hotels
+      DB_PASSWORD: hotels
+      DB_NAME: hotels
+      PORT: 3001
+    depends_on:
+      postgres-hotels:
+        condition: service_healthy         # attendre que la base soit PRÊTE, pas seulement démarrée
+    networks: [tp]
+
+  # -------------------------------------------------------------
+  #  TODO 1 — reservations-service : réservations et disponibilités
+  # -------------------------------------------------------------
+  reservations-service:
+    build: ./reservations-service
+    environment:
+      DB_HOST: postgres-reservations
+      DB_USER: reservations
+      DB_PASSWORD: reservations
+      DB_NAME: reservations
+      HOTELS_URL: http://hotels-service:3001   # il interroge le catalogue par son nom DNS
+      PORT: 3002
+    depends_on:
+      postgres-reservations:
+        condition: service_healthy             # la base doit être PRÊTE
+      hotels-service:
+        condition: service_started             # le catalogue doit être DÉMARRÉ
+    networks: [tp]
+
+  # -------------------------------------------------------------
+  #  TODO 2 — rag-service : le concierge
+  # -------------------------------------------------------------
+  rag-service:
+    build: ./rag-service
+    environment:
+      OLLAMA_URL: http://ollama:11434
+      QDRANT_URL: http://qdrant:6333
+      HOTELS_URL: http://hotels-service:3001
+      RESERVATIONS_URL: http://reservations-service:3002
+      EMBED_MODEL: ${EMBED_MODEL}              # lu dans .env
+      LLM_MODEL: ${LLM_MODEL}                  # lu dans .env
+      PORT: 3003
+    depends_on:                                # forme courte : liste, sans condition
+      - hotels-service
+      - reservations-service
+      - qdrant
+      - ollama
+    networks: [tp]
+
+  # -------------------------------------------------------------
+  #  TODO 3 — gateway : le point d'entrée unique de l'API
+  # -------------------------------------------------------------
+  gateway:
+    build: ./gateway
+    environment:
+      HOTELS_URL: http://hotels-service:3001
+      RESERVATIONS_URL: http://reservations-service:3002
+      RAG_URL: http://rag-service:3003
+      PORT: 3000
+    depends_on:
+      - hotels-service
+      - reservations-service
+      - rag-service
+    networks: [tp]
+
+  # -------------------------------------------------------------
+  #  TODO 4 — front : la page web, le SEUL conteneur visible du navigateur
+  # -------------------------------------------------------------
+  front:
+    build: ./front
+    ports:
+      - "8080:80"                              # port 8080 de VOTRE machine -> port 80 du conteneur
+    depends_on:
+      - gateway
+    networks: [tp]
+
+
+# ---------------------------------------------------------------
+#  Le réseau privé : tous les conteneurs qui y sont se voient par leur nom
+# ---------------------------------------------------------------
+networks:
+  tp:
+    driver: bridge
+
+# ---------------------------------------------------------------
+#  Les volumes nommés : des espaces de stockage qui survivent aux conteneurs
+# ---------------------------------------------------------------
+volumes:
+  hotels-data:
+  reservations-data:
+  qdrant-data:
+  ollama-data:

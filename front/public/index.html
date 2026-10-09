@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Booking - Reservation d'hotels</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">B</span>
+      <span>Booking TP</span>
+    </div>
+    <nav class="period">
+      <label>Du <input type="date" id="from"></label>
+      <label>Au <input type="date" id="to"></label>
+      <button id="apply">Verifier les disponibilites</button>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hotels">
+      <h1>Nos hotels</h1>
+      <div id="hotel-list" class="hotel-grid"></div>
+    </section>
+  </main>
+
+  <div id="reservation-modal" class="modal hidden">
+    <div class="modal-content">
+      <h2 id="modal-hotel-name"></h2>
+      <p id="modal-period"></p>
+      <div id="modal-rooms"></div>
+      <button class="close" id="close-modal">Fermer</button>
+    </div>
+  </div>
+
+  <button id="chat-toggle" class="chat-toggle">Concierge</button>
+  <div id="chat-panel" class="chat-panel hidden">
+    <header>
+      <span>Concierge virtuel</span>
+      <button id="chat-close">x</button>
+    </header>
+    <div id="chat-messages" class="chat-messages"></div>
+    <form id="chat-form" class="chat-form">
+      <input id="chat-input" placeholder="Posez votre question..." autocomplete="off">
+      <button type="submit">Envoyer</button>
+    </form>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
